@@ -1,0 +1,15 @@
+---
+- hosts: state-linux
+  become: true
+  become_user: root
+  become_method: sudo
+
+  vars:
+    user: sarthakj
+
+  tasks:
+   - name: update the system
+     command: rpm -e pix-shelluser-{{ user }}
+
+...
+

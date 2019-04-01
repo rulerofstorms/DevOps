@@ -1,0 +1,30 @@
+- hosts:
+     state-linux
+  become: true
+  become_user: root
+  become_method: sudo
+
+  vars:
+    date: "{{ lookup('pipe', 'date +%m%d%Y') }}"
+    user: "ansible"
+
+  tasks:
+    - name: Sending ansible logs via e-mail to DevOps
+      run_once: true
+      delegate_to: ansible.statetoday.net
+      mail:
+       host: mail1.statetoday.net
+       port: 25
+       username: devops@statetoday.net
+       password: teslaadmin
+       to: Devops <devops@teslagovernment.com>
+       subject: Ansible Windows & Linux Console Report
+       body: Ansible console logs for {{ date}} Details attached.
+       attach:
+       - /home/{{ user }}/ansible/archive/ansible-linux-{{ date }}.txt
+       body: Ansible console logs for {{ date}} Details attached.
+       attach:
+       - /home/{{ user }}/ansible/archive/ansible-windows-{{ date }}.txt       
+
+...
+

@@ -1,0 +1,83 @@
+---
+- hosts: state-windows
+   
+  vars:
+    date: "{{ lookup('pipe', 'date +%m%d%Y') }}"     
+    user: "ansible" 
+
+  tasks:
+
+   - name: Search-only, return list of found updates (if any), log to C:\patch_log.txt
+     win_updates:
+       category_names: SecurityUpdates
+       state: searched
+       log_path: C:\patch_log.txt
+
+   - name: Install all security, critical, and rollup updates without a scheduled task
+     win_updates:
+       category_names:
+       - CriticalUpdates
+       - UpdateRollups
+       - SecurityUpdates
+       reboot: yes
+
+   - name: Create temp log file
+     delegate_to: ansible.statetoday.net   
+     shell: touch /home/{{ user }}/ansible/temp-{{ inventory_hostname }}
+    
+   - name: Prepend hostname to complete temp log file
+     delegate_to: ansible.statetoday.net
+     shell: echo '{{ inventory_hostname }}' >> /home/$USER/ansible/temp-{{ inventory_hostname }}
+
+   - name: Fetch patch_log file
+     fetch: src=C:/patch_log.txt dest=/home/{{ user }}/ansible/{{ inventory_hostname }}-log-{{ date }} flat=yes
+   
+   - name: grep relevant data
+     delegate_to: ansible.statetoday.net
+     #shell: grep title /home/{{ user }}/ansible/{{ inventory_hostname }}-log-{{ date }} >> /home/{{ user }}/ansible/temp-{{ inventory_hostname }}
+     shell: grep -E 'title|\"reboot_required\":' /home/{{ user }}/ansible/{{ inventory_hostname }}-log-{{ date }} >> /home/{{ user }}/ansible/temp-{{ inventory_hostname }}     
+
+   - name: Format temp log 
+     delegate_to: ansible.statetoday.net
+     shell: cat /home/{{ user }}/ansible/temp-{{ inventory_hostname }} | tr -s [:space:] >> /home/{{ user }}/ansible/state-windows-updates-{{ date }}.txt
+     
+   - name: Remove log from windows hosts
+     win_file:
+       path: C:\patch_log.txt
+       state: absent
+
+   - name: Remove temp logs
+     delegate_to: ansible.statetoday.net 
+     command: rm -rf /home/{{ user }}/ansible/temp-{{ inventory_hostname }}
+
+   - name: Remove fetched logs
+     delegate_to: ansible.statetoday.net
+     command: rm -rf /home/{{ user }}/ansible/{{ inventory_hostname }}-log-{{ date }}
+
+   - name: archive to archive
+     delegate_to: ansible.statetoday.net
+     command: cp /home/{{ user }}/ansible/state-windows-updates-{{ date }}.txt /home/{{ user }}/ansible/archive
+      
+   - name: add date to ansible log
+     run_once: true
+     delegate_to: ansible.statetoday.net
+     shell: mv /home/{{ user }}/ansible/archive/ansible.log /home/{{ user }}/ansible/archive/ansible-windows-{{ date }}.txt
+  
+   - name: Sending report via e-mail to DevOps
+     run_once: true
+     delegate_to: ansible.statetoday.net
+     mail:
+       host: mail1.statetoday.net
+       port: 25
+       username: devops@statetoday.net
+       password: teslaadmin
+       to: Devops <devops@teslagovernment.com>, Tyler Wilson <tyler@teslagovernment.com>, Jon Poudel <jon@teslagovernment.com>
+       subject: Statetoday-Windows-Patch-Report
+       body: Windows patching in statetoday has been completed. Details attached. 
+       attach:
+       - /home/{{ user }}/ansible/state-windows-updates-{{ date }}.txt
+
+   - name: archive to archive
+     delegate_to: ansible.statetoday.net
+     command: rm -rf /home/{{ user }}/ansible/state-windows-updates-{{ date }}.txt
+...

@@ -1,0 +1,106 @@
+- hosts:
+    state-linux
+  become: true
+  become_user: root
+  become_method: sudo
+
+  vars:
+    date: "{{ lookup('pipe', 'date +%m%d%Y') }}"
+    user: "ansible"
+  tasks:
+    - name: upgrade all packages
+      yum: name=* state=latest
+
+    - name: Check for reboot hint.
+      shell: LAST_KERNEL=$(rpm -q --last kernel | awk 'NR==1{sub(/kernel-/,""); print $1}'); CURRENT_KERNEL=$(uname -r); if [ $LAST_KERNEL != $CURRENT_KERNEL ]; then echo 'reboot'; else echo 'no'; fi
+      ignore_errors: true
+      register: reboot_hint
+
+    - name: Rebooting ...
+      command: shutdown -r now "Reboot required for updated kernel"
+      async: 0
+      poll: 0
+      sudo: true
+      ignore_errors: true
+      when: reboot_hint.stdout.find("reboot") != -1
+      register: rebooting
+
+    - name: Wait for thing to reboot...
+      pause: seconds=300
+      when: rebooting|changed
+     
+    - name: create temp logs on current host for update
+      shell: touch /var/log/patch_log.txt
+       
+    - name: change permissions for ansible user
+      shell: chown ansible:ansible /var/log/patch_log.txt
+
+    - name: populate temp from yum
+      #shell: grep "$(date +"%b %d")" /var/log/yum.log >> /var/log/patch_log.txt
+      #ignore_errors: true 
+      shell: grep "$(date +"%b %d")" /var/log/yum.log >> /var/log//patch_log.txt   
+      ignore_errors: true
+
+    - name: Create temp log file on ansible
+      delegate_to: ansible.statetoday.net
+      shell: touch /home/{{ user }}/ansible/temp-{{ inventory_hostname }}
+
+    - name: Prepend hostname to complete temp log file
+      delegate_to: ansible.statetoday.net
+      shell: echo '{{ inventory_hostname }}' >> /home/{{ user }}/ansible/temp-{{ inventory_hostname }}
+
+    - name: Fetch patch_log file
+      fetch: src=/var/log/patch_log.txt dest=/home/{{ user }}/ansible/{{ inventory_hostname }}-log-{{ date }} flat=yes
+
+    - name: grep relevant data
+      delegate_to: ansible.statetoday.net
+      shell: cat /home/{{ user }}/ansible/{{ inventory_hostname }}-log-{{ date }} >> /home/{{ user }}/ansible/temp-{{ inventory_hostname }}
+
+    - name: Format temp log append to state log
+      delegate_to: ansible.statetoday.net
+      shell: cat /home/{{ user }}/ansible/temp-{{ inventory_hostname }} | tr -s [:space:] >> /home/{{ user }}/ansible/state-linux-updates-{{ date }}.txt
+      
+    - name: Remove log from linux hosts
+      shell: rm -rf /var/log/patch_log.txt
+    
+    - name: Remove temp logs
+      delegate_to: ansible.statetoday.net
+      command: rm -rf /home/{{ user }}/ansible/temp-{{ inventory_hostname }}
+
+    - name: Remove fetched logs
+      delegate_to: ansible.statetoday.net
+      command: rm -rf /home/{{ user }}/ansible/{{ inventory_hostname }}-log-{{ date }}
+
+    - name: archive to archive
+      delegate_to: ansible.statetoday.net
+      command: cp /home/{{ user }}/ansible/state-linux-updates-{{ date }}.txt /home/{{ user }}/ansible/archive
+
+    - name: change ownership of archived file to user running anible
+      delegate_to: ansible.statetoday.net
+      shell: chown {{ user }}:{{ user }} /home/{{ user }}/ansible/archive/state-linux-updates-{{ date }}.txt
+    
+    - name: add date to ansible log
+      run_once: true
+      delegate_to: ansible.statetoday.net
+      shell: mv /home/{{ user }}/ansible/archive/ansible.log /home/{{ user }}/ansible/archive/ansible-linux-{{ date }}.txt
+
+    - name: Sending report via e-mail to DevOps
+      run_once: true
+      delegate_to: ansible.statetoday.net
+      mail:
+       host: mail1.statetoday.net
+       port: 25
+       username: devops@statetoday.net
+       password: teslaadmin
+       to: Devops <devops@teslagovernment.com>, Tyler Wilson <tyler@teslagovernment.com>, Jon Poudel <jon@teslagovernment.com>
+       subject: Statetoday-Linux-Patch-Report
+       body: Linux patching in statetoday has been completed. Details attached.
+       attach:
+       - /home/{{ user }}/ansible/state-linux-updates-{{ date }}.txt
+
+    - name: archive to archive
+      delegate_to: ansible.statetoday.net
+      command: rm -rf /home/{{ user }}/ansible/state-linux-updates-{{ date }}.txt
+...
+
+
